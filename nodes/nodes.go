@@ -133,7 +133,8 @@ func getPodsOnNode(client kube_client.Interface, node *apiv1.Node) ([]*apiv1.Pod
 
 	pods := make([]*apiv1.Pod, 0)
 	for i := range podsOnNode.Items {
-		if int(*podsOnNode.Items[i].Spec.Priority) < PriorityThreshold {
+		// Ignore pods with priority below threshold on spot nodes
+		if int(*podsOnNode.Items[i].Spec.Priority) < PriorityThreshold && isSpotNode(node) {
 			continue
 		}
 		pods = append(pods, &podsOnNode.Items[i])
