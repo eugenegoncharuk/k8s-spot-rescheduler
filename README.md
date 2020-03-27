@@ -92,6 +92,10 @@ Then build the code using `go build` which will produce the built binary in a fi
 
 `--delete-non-replicated-pods` (default: `false`) Delete non-replicated pods running on on-demand instance. Note that some non-replicated pods will not be rescheduled.
 
+`--kubeconfig` (default: `~/.kube/config`) Fully qualified path to kube config used to run locally.
+
+`--priority-threshold` (default: `0`) Lowest Priority of pods that will be considered when evaluating spot nodes.
+
 ## Scope of the project
 ### Does
 * Look for Pods on on-demand instances
@@ -108,9 +112,9 @@ Then build the code using `go build` which will produce the built binary in a fi
   * MaxEBSVolumeCount
   * NoVolumeZoneConflict
   * ready
-* Checks whether there is enough capacity to move all pods on the on-demand node to spot nodes
+* Checks whether there is enough capacity to move all pods on the on-demand node to spot nodes, ignoring low priority pods
 * Evicts all pods on the node if the previous check passes
-* Leaves the node in a schedulable state - in case it's capacity is required again
+* Leaves the node in a schedulable state - in case its capacity is required again
 
 
 ### Does not
@@ -124,7 +128,7 @@ The rescheduler logic roughly follows the below:
 1. Gets a list of on-demand and spot nodes and their respective Pods
   * Builds a map of nodeInfo structs
     * Add node to struct
-    * Add pods for that node to struct
+    * Add pods for that node to struct, ignoring pods with priority below threshold on spot nodes
     * Add requested and free CPU fields to struct
   * Map these structs based on whether they are on-demand or spot instances.
   * Sort on-demand instances by least requested CPU

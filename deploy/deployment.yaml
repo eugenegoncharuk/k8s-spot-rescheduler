@@ -29,7 +29,6 @@ spec:
               cpu: 10m
               memory: 50Mi
           command:
-            - rescheduler
             - -v=2
             - --running-in-cluster=true
             - --namespace=kube-system
