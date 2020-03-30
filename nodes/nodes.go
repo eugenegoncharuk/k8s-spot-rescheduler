@@ -35,6 +35,8 @@ var (
 	OnDemand NodeType
 	// Spot key for spot instances of NodesMap.
 	Spot NodeType = 1
+	// Lowest Priority considered on spot nodes
+	PriorityThreshold = 0
 )
 
 // NodeInfo struct containing node and it's pods as well information
@@ -131,6 +133,10 @@ func getPodsOnNode(client kube_client.Interface, node *apiv1.Node) ([]*apiv1.Pod
 
 	pods := make([]*apiv1.Pod, 0)
 	for i := range podsOnNode.Items {
+		// Ignore pods with priority below threshold on spot nodes
+		if int(*podsOnNode.Items[i].Spec.Priority) < PriorityThreshold && isSpotNode(node) {
+			continue
+		}
 		pods = append(pods, &podsOnNode.Items[i])
 	}
 	return pods, nil

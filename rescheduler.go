@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,12 +37,12 @@ import (
 	kube_client "k8s.io/client-go/kubernetes"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	kube_restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	kube_leaderelection "k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	kube_record "k8s.io/client-go/tools/record"
 	api "k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/client/leaderelectionconfig"
-	kubectl_util "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/scheduler/schedulercache"
 
 	"github.com/golang/glog"
@@ -81,6 +82,10 @@ var (
 	listenAddress = flags.String("listen-address", "localhost:9235",
 		`Address to listen on for serving prometheus metrics`)
 
+	home = homeDir()
+
+	kubeconfig = flags.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
+
 	deleteNonReplicatedPods = flags.Bool("delete-non-replicated-pods", false, `Delete non-replicated pods running on on-demand instance. Note that some non-replicated pods will not be rescheduled.`)
 
 	showVersion = flags.Bool("version", false, "Show version information and exit.")
@@ -103,6 +108,9 @@ func main() {
 		"spot-node-label",
 		"kubernetes.io/role=spot-worker",
 		`Name of label on nodes to be considered as targets for pods.`)
+
+	flags.IntVar(&nodes.PriorityThreshold, "priority-threshold", 0,
+		`Lowest priority to consider while evaluating spot nodes`)
 
 	flags.Parse(os.Args)
 
@@ -326,6 +334,13 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 	}
 }
 
+func homeDir() string {
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	return os.Getenv("USERPROFILE") // windows
+}
+
 // Configure the kube client used to access the api, either from kubeconfig or
 //from pod environment if running in the cluster
 func createKubeClient(flags *flag.FlagSet, inCluster bool) (kube_client.Interface, error) {
@@ -335,9 +350,13 @@ func createKubeClient(flags *flag.FlagSet, inCluster bool) (kube_client.Interfac
 		// Load config from Kubernetes well known location.
 		config, err = kube_restclient.InClusterConfig()
 	} else {
-		// Search environment for kubeconfig.
-		clientConfig := kubectl_util.DefaultClientConfig(flags)
-		config, err = clientConfig.ClientConfig()
+
+		// use the current context in kubeconfig
+		config, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
+		if err != nil {
+			panic(err.Error())
+		}
+
 	}
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to the client: %v", err)

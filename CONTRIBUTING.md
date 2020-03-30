@@ -1,20 +1,15 @@
 # Contributing
-To develop on this project, please fork the repo and clone into your `$GOPATH`.
-
-Dependencies are **not** checked in so please download those seperately.
-Download the dependencies using [`glide`](https://github.com/Masterminds/glide).
+To develop on this project, please fork and clone the repo. It is now using go modules, no need to clone in your GOPATH. 
 
 ```bash
-cd $GOPATH/src/github.com # Create this directory if it doesn't exist
-git clone git@github.com:<YOUR_FORK>/k8s-spot-rescheduler pusher/k8s-spot-rescheduler
-cd $GOPATH/src/github.com/pusher/k8s-spot-recheduler
+git clone git@github.com:<YOUR_FORK>/k8s-spot-rescheduler .
+cd k8s-spot-recheduler
 ./configure # Configure local tooling - install anything reported as missing
-make vendor # Clone required project dependencies
 ```
 
 The main package is within `rescheduler.go` and an overview of it's operating logic is described in the [Readme](README.md/#operating-logic).
 
-If you want to run the rescheduler locally you must have a valid `kubeconfig` file somewhere on your machine and then run the program with the flag `--running-in-cluster=false`.
+If you want to run the rescheduler locally you must have a valid `kubeconfig` file somewhere on your machine and then run the program with the flag `--running-in-cluster=false`. You can also specify the path to the kube config with `--kubeconfig=/fully/qualified/path`if it differs from ~/.kube/config which is the default. 
 
 ## Pull Requests and Issues
 We track bugs and issues using Github .
@@ -27,4 +22,4 @@ Please mention the open bug issue number within your PR if applicable.
 ### Tests
 Unit tests are covering the decision making parts of this code and can be run using the built in Go test suite.
 
-To run the tests: `make test`
+To run the tests: `go test ./... --cover`

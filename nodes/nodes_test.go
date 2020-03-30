@@ -142,10 +142,20 @@ func TestAddPod(t *testing.T) {
 }
 
 func TestGetPodsOnNode(t *testing.T) {
+	spotLabels := map[string]string{
+		"kubernetes.io/role": "spot-worker",
+	}
+
+	onDemandLabels := map[string]string{
+		"kubernetes.io/role": "worker",
+	}
+
 	node1 := createTestNode("node1", 2000)
 	node2 := createTestNode("node2", 2000)
 	node3 := createTestNode("node3", 2000)
 	node4 := createTestNode("node4", 2000)
+	node5 := createTestNodeWithLabel("node5", 2000, spotLabels)
+	node6 := createTestNodeWithLabel("node6", 2000, onDemandLabels)
 
 	fakeClient := createFakeClient(t)
 
@@ -184,6 +194,26 @@ func TestGetPodsOnNode(t *testing.T) {
 	assert.Equal(t, "p3n4", podsOnNode4[2].Name)
 	assert.Equal(t, "p4n4", podsOnNode4[3].Name)
 	assert.Equal(t, "p5n4", podsOnNode4[4].Name)
+
+	podsOnNode5, err := getPodsOnNode(fakeClient, node5)
+	if err != nil {
+		assert.Error(t, err, "Found error in getting pods on node")
+	}
+	assert.Equal(t, 3, len(podsOnNode5))
+	assert.Equal(t, "p3n5", podsOnNode5[0].Name)
+	assert.Equal(t, "p4n5", podsOnNode5[1].Name)
+	assert.Equal(t, "p5n5", podsOnNode5[2].Name)
+
+	podsOnNode6, err := getPodsOnNode(fakeClient, node6)
+	if err != nil {
+		assert.Error(t, err, "Found error in getting pods on node")
+	}
+	assert.Equal(t, 5, len(podsOnNode6))
+	assert.Equal(t, "p1n6", podsOnNode6[0].Name)
+	assert.Equal(t, "p2n6", podsOnNode6[1].Name)
+	assert.Equal(t, "p3n6", podsOnNode6[2].Name)
+	assert.Equal(t, "p4n6", podsOnNode6[3].Name)
+	assert.Equal(t, "p5n6", podsOnNode6[4].Name)
 
 }
 
@@ -268,6 +298,7 @@ func TestCopyNodeInfos(t *testing.T) {
 }
 
 func createTestPod(name string, cpu int64) *apiv1.Pod {
+	priority := int32(0)
 	pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "kube-system",
@@ -284,6 +315,31 @@ func createTestPod(name string, cpu int64) *apiv1.Pod {
 					},
 				},
 			},
+			Priority: &priority,
+		},
+	}
+	return pod
+}
+
+func createLowPriorityTestPod(name string, cpu int64) *apiv1.Pod {
+	priority := int32(-1)
+	pod := &apiv1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "kube-system",
+			Name:      name,
+			SelfLink:  fmt.Sprintf("/api/v1/namespaces/default/pods/%s", name),
+		},
+		Spec: apiv1.PodSpec{
+			Containers: []apiv1.Container{
+				{
+					Resources: apiv1.ResourceRequirements{
+						Requests: apiv1.ResourceList{
+							apiv1.ResourceCPU: *resource.NewMilliQuantity(cpu, resource.DecimalSI),
+						},
+					},
+				},
+			},
+			Priority: &priority,
 		},
 	}
 	return pod
@@ -349,6 +405,21 @@ func createFakeClient(t *testing.T) *fake.Clientset {
 		*createTestPod("p4n4", 100),
 		*createTestPod("p5n4", 300),
 	}
+	pods5 := []apiv1.Pod{
+		*createLowPriorityTestPod("p1n5", 500),
+		*createLowPriorityTestPod("p2n5", 200),
+		*createTestPod("p3n5", 400),
+		*createTestPod("p4n5", 100),
+		*createTestPod("p5n5", 300),
+	}
+
+	pods6 := []apiv1.Pod{
+		*createLowPriorityTestPod("p1n6", 500),
+		*createLowPriorityTestPod("p2n6", 200),
+		*createTestPod("p3n6", 400),
+		*createTestPod("p4n6", 100),
+		*createTestPod("p5n6", 300),
+	}
 
 	fakeClient := &fake.Clientset{}
 	fakeClient.Fake.AddReactor("list", "pods", func(action core.Action) (bool, runtime.Object, error) {
@@ -366,6 +437,10 @@ func createFakeClient(t *testing.T) *fake.Clientset {
 			podList.Items = pods3
 		case "spec.nodeName=node4":
 			podList.Items = pods4
+		case "spec.nodeName=node5":
+			podList.Items = pods5
+		case "spec.nodeName=node6":
+			podList.Items = pods6
 		default:
 			t.Fatalf("unexpected list restrictions: %v", restrictions)
 		}
