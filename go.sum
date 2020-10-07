@@ -890,6 +890,7 @@ k8s.io/apiserver v0.19.2 h1:xq2dXAzsAoHv7S4Xc/p7PKhiowdHV/PgdePWo3MxIYM=
 k8s.io/apiserver v0.19.2/go.mod h1:FreAq0bJ2vtZFj9Ago/X0oNGC51GfubKK/ViOKfVAOA=
 k8s.io/autoscaler/cluster-autoscaler v0.0.0-20200917024141-03f60a4c3818 h1:IMb+NdGpESa8dsHFNo8NBcattGAnIH7ARkvmP+zs0qg=
 k8s.io/autoscaler/cluster-autoscaler v0.0.0-20200917024141-03f60a4c3818/go.mod h1:XFHAT9pRryttGa+0nHhzGmaF9jpuY4CdUVPX5vE5yFY=
+k8s.io/cli-runtime v0.19.2 h1:d4uOtKhy3ImdaKqZJ8yQgLrdtUwsJLfP4Dw7L/kVPOo=
 k8s.io/cli-runtime v0.19.2/go.mod h1:CMynmJM4Yf02TlkbhKxoSzi4Zf518PukJ5xep/NaNeY=
 k8s.io/client-go v0.19.2 h1:gMJuU3xJZs86L1oQ99R4EViAADUPMHHtS9jFshasHSc=
 k8s.io/client-go v0.19.2/go.mod h1:S5wPhCqyDNAlzM9CnEdgTGV4OqhsW3jGO1UM1epwfJA=

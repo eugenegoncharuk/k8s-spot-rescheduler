@@ -11,7 +11,6 @@ require (
 	k8s.io/apimachinery v0.19.2
 	k8s.io/autoscaler/cluster-autoscaler v0.0.0-20200917024141-03f60a4c3818
 	k8s.io/client-go v0.19.2
-	k8s.io/kubernetes v0.0.0
 )
 
 replace (

@@ -30,6 +30,7 @@ import (
 	"github.com/pusher/k8s-spot-rescheduler/scaler"
 	apiv1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 	simulator "k8s.io/autoscaler/cluster-autoscaler/simulator"
 	autoscaler_drain "k8s.io/autoscaler/cluster-autoscaler/utils/drain"
 	kube_utils "k8s.io/autoscaler/cluster-autoscaler/utils/kubernetes"
@@ -38,7 +39,6 @@ import (
 	kube_restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	kube_record "k8s.io/client-go/tools/record"
-	api "k8s.io/kubernetes/pkg/api/legacyscheme"
 
 	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -328,7 +328,7 @@ func createEventRecorder(client kube_client.Interface) kube_record.EventRecorder
 	eventBroadcaster := kube_record.NewBroadcaster()
 	eventBroadcaster.StartLogging(glog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(client.CoreV1().RESTClient()).Events("")})
-	return eventBroadcaster.NewRecorder(api.Scheme, apiv1.EventSource{Component: "rescheduler"})
+	return eventBroadcaster.NewRecorder(runtime.NewScheme(), apiv1.EventSource{Component: "rescheduler"})
 }
 
 // Determines if any of the nodes meet the predicates that allow the Pod to be
