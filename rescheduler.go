@@ -341,8 +341,11 @@ func findSpotNodeForPod(predicateChecker simulator.PredicateChecker, spotSnapsho
 		pod.Spec.NodeName = ""
 
 		// Check with the schedulers predicates to find a node to schedule on
-		if err := predicateChecker.CheckPredicates(spotSnapshot, pod, nodeInfo.Node.Name); err == nil {
+		err := predicateChecker.CheckPredicates(spotSnapshot, pod, nodeInfo.Node.Name)
+		if err == nil {
 			return nodeInfo.Node.Name
+		} else {
+			glog.V(4).Infof("Pod %s can't be rescheduled on node %s: %v", podID(pod), nodeInfo.Node.Name, err)
 		}
 	}
 
@@ -359,7 +362,7 @@ func canDrainNode(predicateChecker simulator.PredicateChecker, spotSnapshot simu
 		if nodeName == "" {
 			return fmt.Errorf("pod %s can't be rescheduled on any existing spot node", podID(pod))
 		}
-		glog.V(4).Infof("Pod %s can be rescheduled on %v, adding to plan.", podID(pod), nodeName)
+		glog.V(4).Infof("Pod %s can be rescheduled on %s, adding to plan.", podID(pod), nodeName)
 		spotSnapshot.AddPod(pod, nodeName)
 	}
 
