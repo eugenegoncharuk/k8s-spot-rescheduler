@@ -28,8 +28,17 @@ import (
 	simulator "k8s.io/autoscaler/cluster-autoscaler/simulator"
 )
 
+func _createSnapshot(nodes []*nodes.NodeInfo) simulator.ClusterSnapshot {
+	snapshot := simulator.NewBasicClusterSnapshot()
+	for _, node := range nodes {
+		snapshot.AddNodeWithPods(node.Node, node.Pods)
+	}
+
+	return snapshot
+}
+
 func TestFindSpotNodeForPod(t *testing.T) {
-	predicateChecker := simulator.NewTestPredicateChecker()
+	predicateChecker, _ := simulator.NewTestPredicateChecker()
 
 	pods1 := []*apiv1.Pod{
 		createTestPod("p1n1", 100),
@@ -51,22 +60,24 @@ func TestFindSpotNodeForPod(t *testing.T) {
 		createTestNodeInfo(createTestNode("node3", 2000), pods3, 1300),
 	}
 
+	snapshot := _createSnapshot(nodeInfos)
+
 	pod1 := createTestPod("pod1", 100)
 	pod2 := createTestPod("pod2", 200)
 	pod3 := createTestPod("pod3", 700)
 	pod4 := createTestPod("pod4", 2200)
 
-	node := findSpotNodeForPod(predicateChecker, nodeInfos, pod1)
-	assert.Equal(t, "node1", node.Node.Name)
+	nodeName := findSpotNodeForPod(predicateChecker, snapshot, nodeInfos, pod1)
+	assert.Equal(t, "node1", nodeName)
 
-	node = findSpotNodeForPod(predicateChecker, nodeInfos, pod2)
-	assert.Equal(t, "node2", node.Node.Name)
+	nodeName = findSpotNodeForPod(predicateChecker, snapshot, nodeInfos, pod2)
+	assert.Equal(t, "node2", nodeName)
 
-	node = findSpotNodeForPod(predicateChecker, nodeInfos, pod3)
-	assert.Equal(t, "node3", node.Node.Name)
+	nodeName = findSpotNodeForPod(predicateChecker, snapshot, nodeInfos, pod3)
+	assert.Equal(t, "node3", nodeName)
 
-	node = findSpotNodeForPod(predicateChecker, nodeInfos, pod4)
-	assert.Nil(t, node)
+	nodeName = findSpotNodeForPod(predicateChecker, snapshot, nodeInfos, pod4)
+	assert.Equal(t, "", nodeName)
 
 }
 
@@ -89,7 +100,7 @@ func TestNodeLabelValidation(t *testing.T) {
 }
 
 func TestCanDrainNode(t *testing.T) {
-	predicateChecker := simulator.NewTestPredicateChecker()
+	predicateChecker, _ := simulator.NewTestPredicateChecker()
 
 	pods1 := []*apiv1.Pod{
 		createTestPod("p1n1", 100),
@@ -126,12 +137,14 @@ func TestCanDrainNode(t *testing.T) {
 		createTestPod("pod1", 100),
 	}
 
-	err1 := canDrainNode(predicateChecker, spotNodeInfos, podsForDeletion1)
+	snapshot := _createSnapshot(spotNodeInfos)
+
+	err1 := canDrainNode(predicateChecker, snapshot, spotNodeInfos, podsForDeletion1)
 	if err1 != nil {
 		assert.Fail(t, "canDrainNode should be successful with podsForDeletion1", "%v", err1)
 	}
 
-	err2 := canDrainNode(predicateChecker, spotNodeInfos, podsForDeletion2)
+	err2 := canDrainNode(predicateChecker, snapshot, spotNodeInfos, podsForDeletion2)
 	if err2 == nil {
 		assert.Fail(t, "canDrainNode should fail with podsForDeletion2, too much requested CPU.")
 	}

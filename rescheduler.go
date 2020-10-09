@@ -30,7 +30,7 @@ import (
 	"github.com/pusher/k8s-spot-rescheduler/scaler"
 	apiv1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	simulator "k8s.io/autoscaler/cluster-autoscaler/simulator"
 	autoscaler_drain "k8s.io/autoscaler/cluster-autoscaler/utils/drain"
 	kube_utils "k8s.io/autoscaler/cluster-autoscaler/utils/kubernetes"
@@ -38,15 +38,10 @@ import (
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	kube_restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	kube_leaderelection "k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	kube_record "k8s.io/client-go/tools/record"
-	api "k8s.io/kubernetes/pkg/api/legacyscheme"
-	"k8s.io/kubernetes/pkg/client/leaderelectionconfig"
-	"k8s.io/kubernetes/pkg/scheduler/schedulercache"
 
 	"github.com/golang/glog"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	flag "github.com/spf13/pflag"
 )
 
@@ -129,7 +124,7 @@ func main() {
 
 	// Register metrics from metrics.go
 	go func() {
-		http.Handle("/metrics", prometheus.Handler())
+		http.Handle("/metrics", promhttp.Handler())
 		err := http.ListenAndServe(*listenAddress, nil)
 		glog.Fatalf("Failed to start metrics: %v", err)
 	}()
@@ -141,52 +136,9 @@ func main() {
 
 	recorder := createEventRecorder(kubeClient)
 
-	// Allows active/standy HA.
-	// Prevent multiple pods running the algorithm simultaneously.
-	leaderElection := leaderelectionconfig.DefaultLeaderElectionConfiguration()
-	if *inCluster {
-		leaderElection.LeaderElect = true
-	}
+	// This is where the leader election used to be
 
-	if !leaderElection.LeaderElect {
-		// Leader election not enabled.
-		// Execute main logic.
-		run(kubeClient, recorder)
-	} else {
-		id, err := os.Hostname()
-		if err != nil {
-			glog.Fatalf("Unable to get hostname: %v", err)
-		}
-		// Leader election process
-		kube_leaderelection.RunOrDie(kube_leaderelection.LeaderElectionConfig{
-			Lock: &resourcelock.EndpointsLock{
-				EndpointsMeta: metav1.ObjectMeta{
-					Namespace: *namespace,
-					Name:      "k8s-spot-rescheduler",
-				},
-				Client: kubeClient.CoreV1(),
-				LockConfig: resourcelock.ResourceLockConfig{
-					Identity:      id,
-					EventRecorder: recorder,
-				},
-			},
-			LeaseDuration: leaderElection.LeaseDuration.Duration,
-			RenewDeadline: leaderElection.RenewDeadline.Duration,
-			RetryPeriod:   leaderElection.RetryPeriod.Duration,
-			Callbacks: kube_leaderelection.LeaderCallbacks{
-				OnStartedLeading: func(_ <-chan struct{}) {
-					// Since we are committing a suicide after losing
-					// mastership, we can safely ignore the argument.
-					run(kubeClient, recorder)
-				},
-				OnStoppedLeading: func() {
-					glog.Fatalf("Lost leader status, terminating.")
-				},
-			},
-		})
-
-	}
-
+	run(kubeClient, recorder)
 }
 
 func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
@@ -194,7 +146,7 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 	stopChannel := make(chan struct{})
 
 	// Predicate checker from K8s scheduler works out if a Pod could schedule onto a node
-	predicateChecker, err := simulator.NewPredicateChecker(kubeClient, stopChannel)
+	predicateChecker, err := simulator.NewSchedulerBasedPredicateChecker(kubeClient, stopChannel)
 	if err != nil {
 		glog.Fatalf("Failed to create predicate checker: %v", err)
 	}
@@ -260,6 +212,7 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 				// These are sorted when the nodeMap is created.
 				onDemandNodeInfos := nodeMap[nodes.OnDemand]
 				spotNodeInfos := nodeMap[nodes.Spot]
+				spotSnapshot := spotNodeInfos.GetClusterSnapshot()
 
 				// Update spot node metrics
 				updateSpotNodeMetrics(spotNodeInfos, allPDBs)
@@ -275,7 +228,10 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 				for _, nodeInfo := range onDemandNodeInfos {
 
 					// Get a list of pods that we would need to move onto other nodes
-					allPods, err := autoscaler_drain.GetPodsForDeletionOnNodeDrain(nodeInfo.Pods, allPDBs, *deleteNonReplicatedPods, false, false, false, nil, 0, time.Now())
+					allPods, blockingPod, err := autoscaler_drain.GetPodsForDeletionOnNodeDrain(nodeInfo.Pods, allPDBs, *deleteNonReplicatedPods, false, false, nil, 0, time.Now())
+					if blockingPod != nil {
+						glog.Infof("BlockingPod: %v", err)
+					}
 					if err != nil {
 						glog.Errorf("Failed to get pods for consideration: %v", err)
 						continue
@@ -310,9 +266,11 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 					glog.V(2).Infof("Considering %s for removal", nodeInfo.Node.Name)
 
 					// Checks whether or not a node can be drained
-					err = canDrainNode(predicateChecker, spotNodeInfos, podsForDeletion)
+					spotSnapshot.Fork()
+					err = canDrainNode(predicateChecker, spotSnapshot, spotNodeInfos, podsForDeletion)
 					if err != nil {
 						glog.V(2).Infof("Cannot drain node: %v", err)
+						spotSnapshot.Revert()
 						continue
 					}
 
@@ -370,43 +328,42 @@ func createEventRecorder(client kube_client.Interface) kube_record.EventRecorder
 	eventBroadcaster := kube_record.NewBroadcaster()
 	eventBroadcaster.StartLogging(glog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(client.CoreV1().RESTClient()).Events("")})
-	return eventBroadcaster.NewRecorder(api.Scheme, apiv1.EventSource{Component: "rescheduler"})
+	return eventBroadcaster.NewRecorder(runtime.NewScheme(), apiv1.EventSource{Component: "rescheduler"})
 }
 
 // Determines if any of the nodes meet the predicates that allow the Pod to be
 // scheduled on the node, and returns the node if it finds a suitable one.
 // Currently sorts nodes by most requested CPU in an attempt to fill fuller
 // nodes first (Attempting to bin pack)
-func findSpotNodeForPod(predicateChecker *simulator.PredicateChecker, nodeInfos []*nodes.NodeInfo, pod *apiv1.Pod) *nodes.NodeInfo {
-	for _, nodeInfo := range nodeInfos {
-		kubeNodeInfo := schedulercache.NewNodeInfo(nodeInfo.Pods...)
-		kubeNodeInfo.SetNode(nodeInfo.Node)
-
+func findSpotNodeForPod(predicateChecker simulator.PredicateChecker, spotSnapshot simulator.ClusterSnapshot, nodes nodes.NodeInfoArray, pod *apiv1.Pod) string {
+	for _, nodeInfo := range nodes {
 		// Pretend pod isn't scheduled
 		pod.Spec.NodeName = ""
 
 		// Check with the schedulers predicates to find a node to schedule on
-		if err := predicateChecker.CheckPredicates(pod, nil, kubeNodeInfo, true); err == nil {
-			return nodeInfo
+		err := predicateChecker.CheckPredicates(spotSnapshot, pod, nodeInfo.Node.Name)
+		if err == nil {
+			return nodeInfo.Node.Name
+		} else {
+			glog.V(4).Infof("Pod %s can't be rescheduled on node %s: %v", podID(pod), nodeInfo.Node.Name, err)
 		}
 	}
-	return nil
+
+	return ""
 }
 
 // Goes through a list of pods and works out new nodes to place them on.
 // Returns an error if any of the pods won't fit onto existing spot nodes.
-func canDrainNode(predicateChecker *simulator.PredicateChecker, nodeInfos nodes.NodeInfoArray, pods []*apiv1.Pod) error {
-	// Create a copy of the nodeInfos so that we can modify the list
-	nodePlan := nodeInfos.CopyNodeInfos()
+func canDrainNode(predicateChecker simulator.PredicateChecker, spotSnapshot simulator.ClusterSnapshot, nodes nodes.NodeInfoArray, pods []*apiv1.Pod) error {
 
 	for _, pod := range pods {
 		// Works out if a spot node is available for rescheduling
-		spotNodeInfo := findSpotNodeForPod(predicateChecker, nodePlan, pod)
-		if spotNodeInfo == nil {
+		nodeName := findSpotNodeForPod(predicateChecker, spotSnapshot, nodes, pod)
+		if nodeName == "" {
 			return fmt.Errorf("pod %s can't be rescheduled on any existing spot node", podID(pod))
 		}
-		glog.V(4).Infof("Pod %s can be rescheduled on %v, adding to plan.", podID(pod), spotNodeInfo.Node.ObjectMeta.Name)
-		spotNodeInfo.AddPod(pod)
+		glog.V(4).Infof("Pod %s can be rescheduled on %s, adding to plan.", podID(pod), nodeName)
+		spotSnapshot.AddPod(pod, nodeName)
 	}
 
 	return nil
@@ -431,7 +388,7 @@ func drainNode(kubeClient kube_client.Interface, recorder kube_record.EventRecor
 func updateSpotNodeMetrics(spotNodeInfos nodes.NodeInfoArray, pdbs []*policyv1.PodDisruptionBudget) {
 	for _, nodeInfo := range spotNodeInfos {
 		// Get a list of pods that are on the node (Only the types considered by the rescheduler)
-		podsOnNode, err := autoscaler_drain.GetPodsForDeletionOnNodeDrain(nodeInfo.Pods, pdbs, *deleteNonReplicatedPods, false, false, false, nil, 0, time.Now())
+		podsOnNode, _, err := autoscaler_drain.GetPodsForDeletionOnNodeDrain(nodeInfo.Pods, pdbs, *deleteNonReplicatedPods, false, false, nil, 0, time.Now())
 		if err != nil {
 			glog.Errorf("Failed to update metrics on spot node %s: %v", nodeInfo.Node.Name, err)
 			continue

@@ -17,12 +17,14 @@ limitations under the License.
 package nodes
 
 import (
+	"context"
 	"sort"
 	"strings"
 
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	simulator "k8s.io/autoscaler/cluster-autoscaler/simulator"
 	kube_client "k8s.io/client-go/kubernetes"
 )
 
@@ -125,7 +127,7 @@ func (n *NodeInfo) AddPod(pod *apiv1.Pod) {
 
 // Gets a list of pods that are running on the given node
 func getPodsOnNode(client kube_client.Interface, node *apiv1.Node) ([]*apiv1.Pod, error) {
-	podsOnNode, err := client.CoreV1().Pods(apiv1.NamespaceAll).List(
+	podsOnNode, err := client.CoreV1().Pods(apiv1.NamespaceAll).List(context.Background(),
 		metav1.ListOptions{FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": node.Name}).String()})
 	if err != nil {
 		return []*apiv1.Pod{}, err
@@ -219,4 +221,12 @@ func (n NodeInfoArray) CopyNodeInfos() NodeInfoArray {
 		arr = append(arr, nodeInfo)
 	}
 	return arr
+}
+
+func (n NodeInfoArray) GetClusterSnapshot() simulator.ClusterSnapshot {
+	snapshot := simulator.NewDeltaClusterSnapshot()
+	for _, node := range n {
+		snapshot.AddNodeWithPods(node.Node, node.Pods)
+	}
+	return snapshot
 }

@@ -27,8 +27,8 @@ const (
 
 var (
 	// nodePodsCount tracks how many pods are nodes by type and by node name.
-	nodePodsCount = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
+	nodePodsCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: reschedulerNamespace,
 			Name:      "node_pods_count",
 			Help:      "Number of pods on each node.",
