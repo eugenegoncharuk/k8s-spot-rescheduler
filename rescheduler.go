@@ -17,8 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	goflag "flag"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -76,6 +78,9 @@ var (
 
 	listenAddress = flags.String("listen-address", "localhost:9235",
 		`Address to listen on for serving prometheus metrics`)
+
+	spotTaintToBeRemoved = flags.String("spot-node-taint-to-be-removed", "",
+		`Spot Tainе to be removed`)
 
 	home = homeDir()
 
@@ -217,6 +222,8 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 				// Update spot node metrics
 				updateSpotNodeMetrics(spotNodeInfos, allPDBs)
 
+				removeTaintFromAllSpotNodes(kubeClient, spotNodeInfos)
+
 				// No on demand nodes so nothing to do.
 				if len(onDemandNodeInfos) < 1 {
 					glog.V(2).Info("No nodes to process.")
@@ -251,6 +258,12 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 							glog.V(4).Infof("Ignoring pod %s which is controlled by DaemonSet", podID(pod))
 							continue
 						}
+
+						//glog.V(4).Infof("Checking namespace")
+						//if pod.Namespace == "kube-system" {
+						//	glog.V(4).Infof("Ignoring pod %s which is namespace kube-system", podID(pod))
+						//	continue
+						//}
 
 						podsForDeletion = append(podsForDeletion, pod)
 					}
@@ -287,6 +300,31 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 				}
 
 				glog.V(3).Info("Finished processing nodes.")
+			}
+		}
+	}
+}
+
+func removeTaintFromAllSpotNodes(kubeClient kube_client.Interface, spotNodeInfos nodes.NodeInfoArray) {
+	if *spotTaintToBeRemoved == "" {
+		return
+	}
+
+	for _, spotNodeInfo := range spotNodeInfos {
+		for i, taint := range spotNodeInfo.Node.Spec.Taints {
+			if taint.Key == *spotTaintToBeRemoved {
+				// Delete the element from the array without preserving order
+				// https://github.com/golang/go/wiki/SliceTricks#delete-without-preserving-order
+				spotNodeInfo.Node.Spec.Taints[i] = spotNodeInfo.Node.Spec.Taints[len(spotNodeInfo.Node.Spec.Taints)-1]
+				spotNodeInfo.Node.Spec.Taints = spotNodeInfo.Node.Spec.Taints[:len(spotNodeInfo.Node.Spec.Taints)-1]
+
+				updatedNodeWithoutTaint, err := kubeClient.CoreV1().Nodes().Update(context.TODO(), spotNodeInfo.Node, metav1.UpdateOptions{})
+				if err != nil || updatedNodeWithoutTaint == nil {
+					glog.Error("Аailed to update node %v after deleting taint: %v", spotNodeInfo.Node.Name, err)
+					continue
+				}
+
+				glog.Infof("Successfully removed taint on node %v", updatedNodeWithoutTaint.Name)
 			}
 		}
 	}
@@ -359,9 +397,19 @@ func canDrainNode(predicateChecker simulator.PredicateChecker, spotSnapshot simu
 	for _, pod := range pods {
 		// Works out if a spot node is available for rescheduling
 		nodeName := findSpotNodeForPod(predicateChecker, spotSnapshot, nodes, pod)
+
+		// We can't find a Spot node to move this pod to
+		// So let's try to evict this pod if it has annotation cluster-autoscaler.kubernetes.io/safe-to-evict = true
+		// by just draining the node
 		if nodeName == "" {
-			return fmt.Errorf("pod %s can't be rescheduled on any existing spot node", podID(pod))
+			if pod.Annotations["cluster-autoscaler.kubernetes.io/safe-to-evict"] == "false" {
+				return fmt.Errorf("Pod %s can't be rescheduled on any existing node [cluster-autoscaler.kubernetes.io/safe-to-evict=false]", podID(pod))
+			}
+			glog.V(4).Infof("Pod %s can be rescheduled on any available node [cluster-autoscaler.kubernetes.io/safe-to-evict=true]", podID(pod))
+
+			continue
 		}
+
 		glog.V(4).Infof("Pod %s can be rescheduled on %s, adding to plan.", podID(pod), nodeName)
 		spotSnapshot.AddPod(pod, nodeName)
 	}
