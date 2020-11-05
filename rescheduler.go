@@ -320,7 +320,7 @@ func removeTaintFromAllSpotNodes(kubeClient kube_client.Interface, spotNodeInfos
 
 				updatedNodeWithoutTaint, err := kubeClient.CoreV1().Nodes().Update(context.TODO(), spotNodeInfo.Node, metav1.UpdateOptions{})
 				if err != nil || updatedNodeWithoutTaint == nil {
-					glog.Error("Аailed to update node %v after deleting taint: %v", spotNodeInfo.Node.Name, err)
+					glog.Error("Аiled to update node %v after deleting taint: %v", spotNodeInfo.Node.Name, err)
 					continue
 				}
 
