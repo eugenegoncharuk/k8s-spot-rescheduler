@@ -26,3 +26,5 @@ credentials/
 # Local environmental config
 .env
 k8s-spot-rescheduler
+.idea/*.xml
+.idea/*.iml
