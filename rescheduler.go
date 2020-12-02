@@ -180,12 +180,6 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 				if err != nil {
 					glog.Errorf("Failed to get unschedulable pods: %v", err)
 				}
-				if len(unschedulablePods) > 0 {
-					glog.V(2).Info("Waiting for unschedulable pods to be scheduled.")
-					continue
-				}
-
-				glog.V(3).Info("Starting node processing.")
 
 				// Get all nodes in the cluster
 				allNodes, err := nodeLister.List()
@@ -212,9 +206,6 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 					glog.Errorf("Failed to list PDBs: %v", err)
 					continue
 				}
-
-				// Get onDemand and spot nodeInfoArrays
-				// These are sorted when the nodeMap is created.
 				onDemandNodeInfos := nodeMap[nodes.OnDemand]
 				spotNodeInfos := nodeMap[nodes.Spot]
 				spotSnapshot := spotNodeInfos.GetClusterSnapshot()
@@ -223,6 +214,13 @@ func run(kubeClient kube_client.Interface, recorder kube_record.EventRecorder) {
 				updateSpotNodeMetrics(spotNodeInfos, allPDBs)
 
 				removeTaintFromAllSpotNodes(kubeClient, spotNodeInfos)
+
+				if len(unschedulablePods) > 0 {
+					glog.V(2).Info("Waiting for unschedulable pods to be scheduled.")
+					continue
+				}
+
+				glog.V(3).Info("Starting node processing.")
 
 				// No on demand nodes so nothing to do.
 				if len(onDemandNodeInfos) < 1 {
